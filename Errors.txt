@@ -1,0 +1,170 @@
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Explainations
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+kernel oops / Oops
+        'Oops: XXXX [#N] SMP'
+                'XXXX'
+                        1       read                    write
+                        2       kernel mode             user mode
+                '[#N]' is the number of times the Oops occurred - can occur as a cascade effect set off by one
+        'Module linked in: <module_A>(OE) <module_B>(POE) ...'
+                [located in <src>/kernel/panic.c: print tainted]
+                'P' - Proprietary module has been loaded.
+                'F' - Module has been forcibly loaded.
+                'S' - SMP with CPUs not designed for SMP.
+                'R' - User forced a module unload.
+                'M' - System experienced a machine check exception.
+                'B' - System has hit bad_page.
+                'U' - Userspace-defined naughtiness.
+                'D' - Kernel has oopsed before
+                'A' - ACPI table overridden.
+                'W' - Taint on warning.
+                'C' - Modules from drivers/staging are loaded.
+                'I' - Working around severe firmware bug.
+                'O' - Out-of-tree module has been loaded.
+                'E' - Unsigned module has been loaded
+                'L' - A soft lockup has previously occurred
+                'K' - Kernel has been live patched
+                '+' - Module is being loaded, probably running module_init
+                '-' - Module is being unloaded (state is set only after module_exit returns)
+        'RIP: 0010:[<ffffffffa03e1012>]  [<ffffffffa03e1012>] my_oops_init+0x12/0x21 [oops]'
+                'RIP' is the cpu register containing the address of the instruction that is being executed.
+                '0010' is from the code segment register.
+                'my_oops_init+0x12/0x21' is the symbol+offset/length
+        Below 'RIP' until 'Call Trace' is a dump of some possibly relevant CPU registers.
+        'Call Trace' is a list of functions that were called just befor the oops occurred.
+        'Code: ...' is a hex dump of the machine code section that was being run at the time the oops occurred.
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Specific Fixes
+(by Operating System / Tool)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/....: /...<libssl|libcrypto> version `VERSION' not found (required by /...)
+        /usr/lib/x86_64-linux-gnu/libcurl.so.4: /usr/lib/libssl.so.1.0.0: version `OPENSSL_1.0.1' not found (required by /usr/lib/x86_64-linux-gnu/libcurl.so.4)
+        /usr/lib/x86_64-linux-gnu/libcurl.so.4: /usr/lib/libssl.so.1.0.0: version `OPENSSL_1.0.2' not found (required by /usr/lib/x86_64-linux-gnu/libcurl.so.4)
+        $ ldd -v /usr/lib/x86_64-linux-gnu/libcurl.so.4
+                libssl.so.1.0.0 (OPENSSL_1.0.1) => not found
+                libssl.so.1.0.0 (OPENSSL_1.0.2) => not found
+                libssl.so.1.0.0 (OPENSSL_1.0.0) => /usr/lib/libssl.so.1.0.0
+-> add the (<text>) to openssl.ld
+        $ cd /opt/openssl-1.0.1g/
+        $ sudo vi openssl.ld
+                OPENSSL_1.0.0 {
+                    global:
+                         CRYPTO*;
+                         *;
+                    local:
+                         *;
+                };
+
+                OPENSSL_1.0.2 {
+                    global:
+                         SSL_CTX_set_alpn_protos;
+                         SSL_get0_alpn_selected;
+                } OPENSSL_1.0.0;
+
+                OPENSSL_1.0.1 {
+                    global:
+                         SSL_CTX_set_srp_password;
+                         SSL_CTX_set_next_proto_select_cb;
+                         SSL_CTX_set_srp_username;
+                } OPENSSL_1.0.0;
+        $ export CFLAGS=-fPIC
+        $ sudo ./config shared -Wl,--version-script=openssl.ld
+        $ sudo make
+        $ sudo make install_sw
+        // remove libssl.so.* and libcrypto.so.* from the following locations: /usr/lib/x86_64-linux-gnu/, /lib/x86_64-linux-gnu/, /usr/lib/
+        // add the newly created libssl.so.* and libcrypto.so.* to the following locations: /usr/lib/x86_64-linux-gnu/, /lib/x86_64-linux-gnu/, /usr/lib/
+                $ sudo cp /opt/openssl-1.0.1g/libcrypto.so.1.0.0 /usr/lib/x86_64-linux-gnu/libcrypto.so.1.0.0
+
+"Another app is currently holding the yum lock; waiting for it to exit..."
+        -> wait for it to finish, may take a while
+        ->  check with $ ps aux | grep yum
+
+"cannot connect to X server"
+        -> if "ssh <user>@<ip>" exit ssh and re-ssh with "ssh -X <user>@<ip>"
+
+"Error unable to execute application."
+        $ file <application name> //confirm type
+        $ ldd <appname>
+        $ strace -o out.txt <app name> // looking for something at the bottom of the file
+                wants <libname>.so.# but only have <libname>.so.0
+        $ cd <dir/containing/.so.0>
+        $ cp <libname>.so.0 <libname>.so.#
+"Invalid partition table - recursive partition on"
+        -> $dd if=/dev/zero of=/dev/sd<?> bs=10M
+
+"insmod: ERROR: could not insert module host/nvme.ko: Unknown symbol in module"
+        dmesg
+                "Unknown symbol <symbol> (err 0)" -> when trying to load a compiled kernel module
+        grep -irE "<symbol(s)>" /usr/src/$(uname-r)/
+                "./Module.symvers:<hex number> <symbol> <location/of/file/containing> EXPORT_SYMBOL_GPL"
+        -> "MODULE_LICENSE("GPL") must be in all module files not just the main one
+        - OR -
+        $ cd /to/location/of/rpmbuild/BUILD/kernel-$(uname -r)/linux*
+        $ make menuconfig
+        $ make prepare
+        $ make modules_prepare
+        $ make M=location/of/module/file
+        $ modprobe module
+
+"mount: unknown filesystem type 'linux_raid_member'"
+        -> # mdadm --stop /dev/md3
+           # mdadm --remove /dev/md3
+           # mdadm --zero-superblock /dev/nvme3n1p1
+
+"No address associated with hostname"
+        $ vi /etc/hosts
+                remove 127.0.1.1
+        A network settings
+                backspace hostname
+        $ reboot
+
+"relocation * against symbol `*` cna not be used when making a shared object; recompile with -fPIC"
+->        $ export CFLAGS=-fPIC
+        // $ ./config ...
+        $ make
+
+SYSTEM -------------------------------------------
+*** CENTOS 7 ***
+(3.10.0-514)
+"mount: mount /dev/nvme0n1p1 on /data/uwrap0 failed: Structure needs cleaning"
+"        XFS (nvme0n1p1): Metadata corruption detected at xfs_inode_buf_verify+<...> [xfs], xfs_inode block 0x40"
+"        XFS (nvme0n1p1): Unmount and run xfs_repair"
+"        XFS (nvme0n1p1): First 64 bytes of corrupted metadata buffer:"
+        -> $ xfs_repair /dev/nvme0n1p1
+
+"WARNING:  Symbol version dump ./Module.symvers is missing; modules will have no dependencies and modversions."
+        -> $ cd .../linux-.../
+           $ make
+           $ make modules // this will generate a new Module.symvers
+
+*** PANIC ***
+(Centos7-693)
+$ crash  /usr/lib/debug/lib/modules/$(uname -r)/vmlinux /var/crash/<ip>-<yyyy>-<mm>-<dd>-<hh>\:<mm>\:<ss>/vmcore
+> log // displays full dmesg log
+> bt  // displays backtrace of crash
+        -a // all cpus
+        -f // all stack data in frame
+        -l // show file and line number of each text location
+// bt is read from bottom up (crash and panic is usually at tho #0)
+// instruction that caused the fault would be re-run if the fault was resolved
+// see *Cheats/Eplainations -> kernel oops / Oops*
+*** UBUNTU ***
+(15.10)
+"Err http://security.ubuntIu.com *"
+"  404  Not Found [IP: 91.189.88.161 80]"
+"Err http://us.archive.ubuntu.com *"
+"  404  Not Found [IP: 91.189.91.26 80]"
+"W: Failed to fetch http://us.archive.ubuntu.com/ubuntu/*"
+"..."
+"W: Failed to fetch http://security.ubuntu.com/ubuntu/*"
+"..."
+->      // ONLY DONE ONCE
+        $ vi /etc/apt/sources.list
+        :%s/security/old-releases
+        :%s/us.archive/old-releases
+        :wq
+        $ sudo apt-get update
+        // There you go. No 404 Errors this time. You can now install all the available packages for your Ubuntu Release.
+
